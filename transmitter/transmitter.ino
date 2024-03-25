@@ -109,6 +109,14 @@ void loop() {
       Serial.print(F(" us. Sent: "));
       Serial.println(payload);  // print payload sent
       payload += 0.01;          // increment float payload
+      while (Serial.available() > 0) {
+        // Read the character from Serial
+        char ch = Serial.read();
+        // Echo the character back to Serial Monitor
+        Serial.print("Received: ");
+        Serial.println(ch);
+      }
+        
     } else {
       Serial.println(F("Transmission failed or timed out"));  // payload was not delivered
     }
@@ -134,7 +142,7 @@ void loop() {
 
   if (Serial.available()) {
     // change the role via the serial monitor
-
+/*
     char c = toupper(Serial.read());
     if (c == 'T' && !role) {
       // Become the TX node
@@ -149,7 +157,7 @@ void loop() {
       role = false;
       Serial.println(F("*** CHANGING TO RECEIVE ROLE -- PRESS 'T' TO SWITCH BACK"));
       radio.startListening();
-    }
+    }*/
   }
 
 }  // loop
