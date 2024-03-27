@@ -98,24 +98,24 @@ void loop() {
   if (role) {
     // This device is a TX node
 
-    unsigned long start_timer = micros();                // start the timer
-    bool report = radio.write(&payload, sizeof(float));  // transmit & save the report
-    unsigned long end_timer = micros();                  // end the timer
-
     if (1) {
-      Serial.print(F("Transmission successful! "));  // payload was delivered
-      Serial.print(F("Time to transmit = "));
-      Serial.print(end_timer - start_timer);  // print the timer result
-      Serial.print(F(" us. Sent: "));
-      Serial.println(payload);  // print payload sent
-      payload += 0.01;          // increment float payload
+      char ch;
       while (Serial.available() > 0) {
         // Read the character from Serial
-        char ch = Serial.read();
+        ch = Serial.read();
         // Echo the character back to Serial Monitor
         Serial.print("Received: ");
         Serial.println(ch);
+        unsigned long start_timer = micros();                // start the timer
+        bool report = radio.write(&ch, sizeof(char));  // transmit & save the report
+        unsigned long end_timer = micros();                  // end the timer
+        Serial.print(F("Transmission successful! "));  // payload was delivered
+        Serial.print(F("Time to transmit = "));
+        Serial.print(end_timer - start_timer);  // print the timer result
+        Serial.print(F(" us. Sent: "));
+        Serial.println(ch);  // print payload sent
       }
+      payload += 0.01;          // increment float payload
         
     } else {
       Serial.println(F("Transmission failed or timed out"));  // payload was not delivered
