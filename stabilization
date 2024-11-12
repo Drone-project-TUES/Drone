@@ -1,0 +1,178 @@
+#include <Wire.h>
+#include <MPU6050.h>
+#include <ESP32Servo.h>
+
+// Initialize MPU6050
+MPU6050 mpu;
+
+// Kalman Filter variables for both Pitch and Roll axes
+float Q_angle = 0.001; // Process noise variance for the accelerometer
+float Q_gyro = 0.003;  // Process noise variance for the gyro
+float R_angle = 0.03;  // Measurement noise variance
+
+// Variables for Pitch (Forward/Backward)
+float anglePitch = 0.0;
+float biasPitch = 0.0;
+float P_00Pitch = 1, P_01Pitch = 0, P_10Pitch = 0, P_11Pitch = 1;
+
+// Variables for Roll (Left/Right)
+float angleRoll = 0.0;
+float biasRoll = 0.0;
+float P_00Roll = 1, P_01Roll = 0, P_10Roll = 0, P_11Roll = 1;
+
+// PID controller parameters
+float kp = 3.0; // Proportional gain
+float ki = 0.0; // Integral gain
+float kd = 0.1; // Derivative gain
+
+// PID variables for Pitch
+float pitch_error = 0;
+float pitch_integral = 0;
+float pitch_derivative = 0;
+float pitch_prev_error = 0;
+
+// PID variables for Roll
+float roll_error = 0;
+float roll_integral = 0;
+float roll_derivative = 0;
+float roll_prev_error = 0;
+
+// Motor control
+Servo motor1; // Front Right - D4 (Originally Front Left)
+Servo motor2; // Rear Right - D16 (Originally Front Right)
+Servo motor3; // Rear Left - D17 (Originally Rear Right)
+Servo motor4; // Front Left - D5  (Originally Rear Left)
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  mpu.initialize();
+
+  if (!mpu.testConnection()) {
+    Serial.println("MPU6050 connection failed");
+    while (1);
+  }
+  Serial.println("MPU6050 initialized successfully!");
+
+  // Attach motors to respective pins
+  motor1.attach(4);   // D4 - Front Right (M1)
+  motor2.attach(16);  // D16 - Rear Right (M2)
+  motor3.attach(17);  // D17 - Rear Left (M3)
+  motor4.attach(5);   // D5  - Front Left (M4)
+
+  // Initialize motors to minimum throttle
+  motor1.writeMicroseconds(1000);
+  motor2.writeMicroseconds(1000);
+  motor3.writeMicroseconds(1000);
+  motor4.writeMicroseconds(1000);
+
+  delay(2000); // Wait for ESCs to initialize
+}
+
+float kalmanFilter(float newAngle, float newRate, float dt, float &angle, float &bias, float &P_00, float &P_01, float &P_10, float &P_11) {
+  // Predict step
+  angle += dt * (newRate - bias);
+
+  P_00 += -dt * (P_10 + P_01) + Q_angle * dt;
+  P_01 += -dt * P_11;
+  P_10 += -dt * P_11;
+  P_11 += Q_gyro * dt;
+
+  // Update step
+  float y = newAngle - angle;
+  float S = P_00 + R_angle;
+  float K_0 = P_00 / S;
+  float K_1 = P_10 / S;
+
+  angle += K_0 * y;
+  bias += K_1 * y;
+
+  float P_00_temp = P_00;
+  float P_01_temp = P_01;
+
+  P_00 -= K_0 * P_00_temp;
+  P_01 -= K_0 * P_01_temp;
+  P_10 -= K_1 * P_00_temp;
+  P_11 -= K_1 * P_01_temp;
+
+  return angle;
+}
+
+void loop() {
+  int16_t ax, ay, az, gx, gy, gz;
+  mpu.getAcceleration(&ax, &ay, &az);
+  mpu.getRotation(&gx, &gy, &gz);
+
+  // **Adjusted Angle Calculations for 90° Rotated MPU6050**
+  // After 90° rotation clockwise around Z-axis:
+  // - Drone's Pitch is sensor's Y-axis
+  // - Drone's Roll is sensor's -X-axis
+
+  // Calculate angles from accelerometer
+  float accelAnglePitch = atan2(ay, az) * 180 / PI;    // Pitch (Forward/Backward Tilt)
+  float accelAngleRoll = atan2(-ax, az) * 180 / PI;    // Roll (Left/Right Tilt)
+
+  // Gyro rates in degrees per second
+  float gyroRatePitch = gy / 131.0; // Y-axis gyro corresponds to Pitch
+  float gyroRateRoll = -gx / 131.0; // -X-axis gyro corresponds to Roll
+
+  // Time difference (in seconds)
+  static unsigned long lastTime = 0;
+  unsigned long now = millis();
+  float dt = (now - lastTime) / 1000.0;
+  lastTime = now;
+
+  // Apply the Kalman filter for both Pitch and Roll angles
+  float filteredAnglePitch = kalmanFilter(accelAnglePitch, gyroRatePitch, dt, anglePitch, biasPitch, P_00Pitch, P_01Pitch, P_10Pitch, P_11Pitch);
+  float filteredAngleRoll = kalmanFilter(accelAngleRoll, gyroRateRoll, dt, angleRoll, biasRoll, P_00Roll, P_01Roll, P_10Roll, P_11Roll);
+
+  // Desired angles (level flight)
+  float desiredPitch = 0.0;
+  float desiredRoll = 0.0;
+
+  // Compute errors
+  pitch_error = desiredPitch - filteredAnglePitch;
+  roll_error = desiredRoll - filteredAngleRoll;
+
+  // Compute PID for Pitch
+  pitch_integral += pitch_error * dt;
+  pitch_derivative = (pitch_error - pitch_prev_error) / dt;
+  float pitch_output = kp * pitch_error + ki * pitch_integral + kd * pitch_derivative;
+  pitch_prev_error = pitch_error;
+
+  // Compute PID for Roll
+  roll_integral += roll_error * dt;
+  roll_derivative = (roll_error - roll_prev_error) / dt;
+  float roll_output = kp * roll_error + ki * roll_integral + kd * roll_derivative;
+  roll_prev_error = roll_error;
+
+  // Base throttle (adjust as needed)
+  float base_throttle = 1150; // Value between 1000 (min) and 2000 (max)
+
+  // **Updated Motor Outputs After Inverting Pitch Control**
+  float m3_output = base_throttle - pitch_output + roll_output; // Front Right (M1)
+  float m4_output = base_throttle + pitch_output + roll_output; // Rear Right (M2)
+  float m1_output = base_throttle + pitch_output - roll_output; // Rear Left (M3)
+  float m2_output = base_throttle - pitch_output - roll_output; // Front Left (M4)
+
+  // Constrain motor outputs to valid range
+  m1_output = constrain(m1_output, 1000, 2000);
+  m2_output = constrain(m2_output, 1000, 2000);
+  m3_output = constrain(m3_output, 1000, 2000);
+  m4_output = constrain(m4_output, 1000, 2000);
+
+  // Set motor speeds
+  motor1.writeMicroseconds(m1_output); // Front Right
+  motor2.writeMicroseconds(m2_output); // Rear Right
+  motor3.writeMicroseconds(m3_output); // Rear Left
+  motor4.writeMicroseconds(m4_output); // Front Left
+
+  // Debugging information
+  Serial.print("Pitch Angle: "); Serial.print(filteredAnglePitch);
+  Serial.print(" | Pitch Output: "); Serial.print(pitch_output);
+  Serial.print(" | Roll Angle: "); Serial.print(filteredAngleRoll);
+  Serial.print(" | Roll Output: "); Serial.println(roll_output);
+
+  // Maintain loop rate
+  delay(20); // 50 Hz
+}
