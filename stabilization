@@ -21,9 +21,9 @@ float biasRoll = 0.0;
 float P_00Roll = 1, P_01Roll = 0, P_10Roll = 0, P_11Roll = 1;
 
 // PID controller parameters
-float kp = 3.0; // Proportional gain
-float ki = 0.0; // Integral gain
-float kd = 0.1; // Derivative gain
+float kp = 0.384;  // Proportional gain
+float ki = 1.536;  // Integral gain
+float kd = 0.152;  // Derivative gain
 
 // PID variables for Pitch
 float pitch_error = 0;
@@ -147,7 +147,7 @@ void loop() {
   roll_prev_error = roll_error;
 
   // Base throttle (adjust as needed)
-  float base_throttle = 1150; // Value between 1000 (min) and 2000 (max)
+  float base_throttle = 1230; // Value between 1000 (min) and 2000 (max)
 
   // **Updated Motor Outputs After Inverting Pitch Control**
   float m3_output = base_throttle - pitch_output + roll_output; // Front Right (M1)
